@@ -277,7 +277,18 @@ namespace Warped.Items
 			base.Deserialize ( reader );
 			currentGate = (UltimaMoongate_Frame_Base)reader.ReadItem();
 
-			this.Delete();
+			// If opentime is non-zero, assume this was a summoned gate and delete it.
+			// If summoned by an UltimaMoongate by the moon phase, it'll re-create it when it loads.
+			// If summoned by spell or GM, it was intended to be temporary anyways.
+			if (OpenTime > 0)
+				this.Delete();
+
+			// If zero, it was supposed to be open forever. Raise the gate!
+			else
+			{
+				gateTimer = new TransitionTimer (this);
+				gateTimer.Start ();
+			}
 		}
 	   
 		// Bare-bones teleporter. No extra checks like the ones in Items/Misc/PublicMoongate.cs.
