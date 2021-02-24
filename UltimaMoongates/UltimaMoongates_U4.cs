@@ -1,6 +1,10 @@
 /* UltimaMoongates_U4 - An Ultima IV-style moongate system for UO.
  * The phases of the moons once again control the moongates.
  *
+ * ****
+ * NOTE: This file requires "UltimaMoongates_Animations.cs" to function!
+ * ****
+ *
  * Author: Warped Dragon aka Dallen Wilson <dwjwilson@lavabit.com>
  *
  * A list of phases by number, name and destination is available in a comment block further down.
@@ -10,8 +14,8 @@
  * The command '[U4MoonGen' will auto-generate these moongates on both the Trammel and Felucca facets, removing any existing moongates (U4 or stock) from the moongate circles.
  *
  * Items:
- * [add UltimaMoongate [0-7]:			Creates a moongate that opens at Trammel phase (0 to 7). Destination while it's open is controlled by Felucca.
- * [add UltimaMoongate_U4 [double]:		Creates a moongate that opens immediately and stays open for [double] seconds before closing. It's destination changes with the phase of Felucca. Use 0 for a gate that never closes.
+ * [add UltimaMoongate [int 0-7]:		Creates a moongate that opens at Trammel phase (0 to 7). Destination while it's open is controlled by Felucca.
+ * [add UltimaMoongate_U4 [double]:		Creates a moongate that opens immediately and stays open for [double] seconds before closing. It's destination changes with the phase of Felucca. Use 0.0 for a gate that never closes.
  *
  * Notes:
  * Uses RunUO's existing in-game time and moon phase system, details of which can be found in Scripts/Skill Items/Tinkering/Clocks.cs.
@@ -31,6 +35,7 @@ using Server;
 using Server.Commands;
 using Server.Mobiles;
 using Server.Items;
+using Warped.Items;
 
 namespace Warped.Items
 {
