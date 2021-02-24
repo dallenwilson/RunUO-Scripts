@@ -3,7 +3,7 @@ A collection of scripts for the RunUO Ultima Online Server Emulator, versions 2.
 
 ### UltimaMoongates/*
 - UltimaMoongates_Animations.cs:
-- - A collection of templates that make use of the various rising animations that the stock client never did. Moongates can rise from the ground, stay open their allotted time, and then sink gracefully back down.
+- - A collection of templates that make use of the various rising animations that the stock client never did. Moongates can rise from the ground, stay open their allotted time, and then sink gracefully back down. Looks wonderful in client.exe, untested in uotd.exe, and a bit choppy in ClassicUO.
 - - <b>Every other file in this folder depends on this one.</b>
 - - All four colours are available: Blue, Red, Black, Silver
 - - Item ID's confirmed available with a Mondain's Legacy / v4.0.0 client.exe. Previous UO versions may only have the Blue available.
