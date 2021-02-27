@@ -12,3 +12,10 @@ A collection of scripts for the RunUO Ultima Online Server Emulator, versions 2.
 
 ### Misc:
 - ChatLogging.cs: Logs all speech by users to the console and to a log file. Requires two small changes in PlayerMobile.cs. A copy is available in Scripts/Mobiles/PlayerMobile.cs, but I advise against just dropping that in your server and replacing the existing one. Make the changes yourself. Use diff to find them.
+
+### Screenshots:
+A blue moongate with the stock 2D client.exe:
+![Animated gif](screenshots/bluegate_client2d.gif?raw=true "A blue moongate opening for 5.0 seconds.")
+
+A blue moongate with ClassicUO:
+![Animated gif](screenshots/bluegate_ClassicUO.gif?raw=true "A blue moongate opening for 5.0 seconds.")
