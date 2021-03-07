@@ -2,12 +2,15 @@
  * 
  * Author: Warped Dragon aka Dallen Wilson <dwjwilson@lavabit.com>
  *
- * This file contains a set of base classes for moongate managers, animation frames and timers. It also contains a set of basic, usable moongates of every colour available in the game files (Blue, Red, Black, Silver).
+ * This file contains a moongate manager and animation frame manager, capable of opening and closing a fully functional moongate of any four basic colours (Blue, Red, Black, Silver).
  *
  * Usage:
- * Add a moongate with '[add UltimaMoongate_[Blue/Red/Black/Silver] [double], where double is the amount of time in real-world seconds the gate should stay open.
+ * To create a moongate on-the-fly in game, use '[add UltimaMoongate [double] [int]'
+ * where double is the amount of time in real-world seconds the gate should stay open and [int] sets the color (0 to 3).
+ * It can be used with only [double], and will default to a Blue gate.
+ *
  * The gate will rise gracefully from the ground, wait it's alloted open time, then slowly sink again. A time of 0 means the gate stays open indefinitely.
- * Target, Map, and other settings can be adjusted with '[props', or specified when creating the gate, see UltimaMoongate_Base for details.
+ * Target, Map, and other settings can be adjusted with '[props'. All options can be set at creation time when creating via another script.
  *
  * ItemID reference:
  * (gleaned directly from the game files with a verdata viewer)
@@ -82,12 +85,22 @@ namespace Warped.Items
 		public static TimeSpan MoongateTransitionTime = TimeSpan.FromSeconds (0.25);
 
 		[Constructable]
-		public UltimaMoongate ( MoongateColour color = MoongateColour.Blue, bool dispel = false ) : this( Point3D.Zero, null, 0.0, color, dispel )
-		{}
+		public UltimaMoongate ( MoongateColour color = MoongateColour.Blue, bool dispel = false ) : this( Point3D.Zero, null, 0.0, color, dispel ) {}
 
 		[Constructable]
-		public UltimaMoongate (Point3D target, Map targetmap ) : this( target, targetmap, 0.0 )
-		{}
+		public UltimaMoongate (Point3D target, Map targetmap ) : this( target, targetmap, 0.0 ) {}
+
+        [Constructable]
+        public UltimaMoongate (double opentime, MoongateColour color = MoongateColour.Blue, bool dispell = false, bool restrict = false, bool returngate = false) : this ( Point3D.Zero, null, opentime, color, dispell, restrict, returngate ) {}
+
+        [Constructable]
+        public UltimaMoongate (double opentime) : this ( Point3D.Zero, null, opentime, MoongateColour.Blue, false, false, false) {}
+
+		[Constructable]
+		public UltimaMoongate (double opentime, int color) : this ( Point3D.Zero, null, opentime, (MoongateColour)color, false, false, false) {}
+
+		[Constructable]
+		public UltimaMoongate (int color) : this ( Point3D.Zero, null, 0, (MoongateColour)color, false, false, false) {}
 
 		[Constructable]
 		public UltimaMoongate (Point3D target, Map map, double opentime, MoongateColour color = MoongateColour.Blue, bool dispel = false, bool restrict = false, bool returngate = false) : base( 0X1F13 )
@@ -109,13 +122,6 @@ namespace Warped.Items
 			
 			initGate ();
 		}
-
-		[Constructable]
-		public UltimaMoongate (double opentime, MoongateColour color = MoongateColour.Blue, bool dispell = false, bool restrict = false, bool returngate = false) : this ( Point3D.Zero, null, opentime, color, dispell, restrict, returngate )
-		{}
-
-		[Constructable]
-		public UltimaMoongate (double opentime) : this ( Point3D.Zero, null, opentime, MoongateColour.Blue, false, false, false) {}
 
 		public UltimaMoongate ( Serial serial ) : base( serial ) { }
 		
