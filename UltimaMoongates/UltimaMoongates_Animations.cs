@@ -33,55 +33,42 @@
 
 using System;
 using Server;
+using Server.Items;
 using Server.Mobiles;
+using Server.Regions;
+using Server.Gumps;
+using Server.Network;
 
 namespace Warped.Items
 {
-	// This is the timer used by all the moongate frames, to cycle through the rising / falling animations.
-	public class MoongateTransitionTimer : Timer
+	public enum MoongateColour
 	{
-		private bool m_reverse = false;
-		private UltimaMoongate_Base m_Gate;
-		private UltimaMoongate_Frame_Base m_thisGate;
+		Blue,
+		Red,
+		Black,
+		Silver
+	}
 
-		public MoongateTransitionTimer (UltimaMoongate_Base gate, bool reverse = false) : base ( TimeSpan.FromSeconds (0.25) )
-		{
-			m_Gate = gate;
-			m_reverse = reverse;
-			Priority = TimerPriority.TwentyFiveMS;
-		}
-		
-		public MoongateTransitionTimer (UltimaMoongate_Base gate, UltimaMoongate_Frame_Base thisgate, bool reverse = false, double opentime = 0.25) : base ( TimeSpan.FromSeconds (opentime) )
-		{
-			m_Gate = gate;
-			m_thisGate = thisgate;
-			m_reverse = reverse;
-			Priority = TimerPriority.TwentyFiveMS;
-		}
-		
-		public bool Reverse
-		{
-			get { return m_reverse; }
-			set { m_reverse = value; }
-		}
-		public UltimaMoongate_Base Gate
-		{
-			get { return m_Gate; }
-			set { m_Gate = value; }
-		}
-		public UltimaMoongate_Frame_Base ThisGate
-		{
-			get { return m_thisGate; }
-			set { m_thisGate = value; }
-		}
+	public enum MoongateFrame
+	{
+		Frame0,
+		Frame1,
+		Frame2,
+		Frame3,
+		Frame4,
+		Frame5,
+		Frame6,
+		Frame7,
+		Frame8,
+		Frame9
 	}
 	
-	// This is the manager for the moongate. It everything; Creation of the animations, teleporting, targeting, etc.
+	// This is the manager for the moongate. It handles everything; Creation of the animations, teleporting, targeting, etc.
 	// Some of it was lifted from Items/Skill Items/Magical/Misc/Moongate.cs and Items/Misc/PublicMoongate.cs
-	public class UltimaMoongate_Base : Item
+	public class UltimaMoongate : Item
 	{
-		public bool gateOpened = false;
-		public UltimaMoongate_Frame_Base currentGate = null;
+		private bool m_gateOpened = false;
+		public UltimaMoongate_Frame currentGate = null;
 
 		private double m_openTime = 0;
 		private bool m_useStockRestrictions = false;
@@ -89,11 +76,21 @@ namespace Warped.Items
 		private Map m_TargetMap = null;
 		private bool m_bDispellable = false;
 		private bool m_createReturnGate = false;
+		private MoongateColour m_Colour = MoongateColour.Blue;
 
 		public Timer gateTimer;
+		public static TimeSpan MoongateTransitionTime = TimeSpan.FromSeconds (0.25);
 
 		[Constructable]
-		public UltimaMoongate_Base (Point3D target, Map map, double opentime, bool dispel = false, bool restrict = false, bool returngate = false) : base( 0X1F13 )
+		public UltimaMoongate ( MoongateColour color = MoongateColour.Blue, bool dispel = false ) : this( Point3D.Zero, null, 0.0, color, dispel )
+		{}
+
+		[Constructable]
+		public UltimaMoongate (Point3D target, Map targetmap ) : this( target, targetmap, 0.0 )
+		{}
+
+		[Constructable]
+		public UltimaMoongate (Point3D target, Map map, double opentime, MoongateColour color = MoongateColour.Blue, bool dispel = false, bool restrict = false, bool returngate = false) : base( 0X1F13 )
 		{
 			Movable = false;
 			Visible = false;
@@ -106,21 +103,27 @@ namespace Warped.Items
 			m_bDispellable = dispel;
 			m_useStockRestrictions = restrict;
 			m_createReturnGate = returngate;
+			m_Colour = color;
+
+			Light = LightType.Empty;
+			
+			initGate ();
 		}
+
 		[Constructable]
-		public UltimaMoongate_Base (double opentime, bool dispell = false, bool restrict = false, bool returngate = false) : base ( 0x1F13 )
+		public UltimaMoongate (double opentime, MoongateColour color = MoongateColour.Blue, bool dispell = false, bool restrict = false, bool returngate = false) : this ( Point3D.Zero, null, opentime, color, dispell, restrict, returngate )
+		{}
+
+		[Constructable]
+		public UltimaMoongate (double opentime) : this ( Point3D.Zero, null, opentime, MoongateColour.Blue, false, false, false) {}
+
+		public UltimaMoongate ( Serial serial ) : base( serial ) { }
+		
+		public virtual void initGate ()
 		{
-			Movable = false;
-			Visible = false;
-			Name = "Manager for an UltimaMoongate.";
-
-			m_openTime = opentime;
-			m_bDispellable = dispell;
-			m_useStockRestrictions = restrict;
-			m_createReturnGate = returngate;
+			gateTimer = new TransitionTimer (this);
+			gateTimer.Start();
 		}
-
-		public UltimaMoongate_Base ( Serial serial ) : base( serial ) { }
 	 
 		public override void Serialize( GenericWriter writer )
 		{
@@ -133,8 +136,6 @@ namespace Warped.Items
 			writer.Write( (bool) m_useStockRestrictions );
 		}
 
-		// Derived classes will need to extend this for their own unique circumstances.
-		// Re-creating the visible gate, deleting this, or something else.
 		public override void Deserialize( GenericReader reader )
 		{
 			base.Deserialize( reader );
@@ -144,8 +145,27 @@ namespace Warped.Items
 			m_TargetMap = reader.ReadMap ();
 			m_Target = reader.ReadPoint3D ();
 			m_useStockRestrictions = reader.ReadBool();
+
+			if (m_openTime > 0)
+				currentGate = new UltimaMoongate_Frame (this, MoongateFrame.Frame8, false, GetMoongateFrameID (m_Colour, MoongateFrame.Frame8));
+			else
+				this.Delete ();
 		}
-	
+
+		public virtual bool ShowFeluccaWarning{ get{ return false; } }
+		public MoongateColour Colour { get { return m_Colour; } }
+		public bool gateOpened
+		{
+			get { return m_gateOpened; }
+			set
+			{
+				m_gateOpened = value;
+				if (value)
+					Light = LightType.Circle300;
+				else
+					Light = LightType.Empty;
+			}
+		}
 		[CommandProperty( AccessLevel.GameMaster )]
 		public double OpenTime
 		{
@@ -195,51 +215,279 @@ namespace Warped.Items
 			if (!gateOpened)
 				return false;
 
-			if (!m.Player)
-				return false;
+			if (m.Player)
+				CheckGate (m, 0);
 
-			if (m_Target == Point3D.Zero)
-				return false;
-
-			if (m_TargetMap == null)
-				return false;
-
-			if (!m_useStockRestrictions)
-			{
-				BaseCreature.TeleportPets (m, m_Target, m_TargetMap);
-				m.MoveToWorld (m_Target, m_TargetMap);
-
-				if ( m.AccessLevel == AccessLevel.Player || !m.Hidden )
-					m.PlaySound( 0x1FE );
-			}
-
-			return false;
+			return true;
 		}
 
+        public virtual void UseGate( Mobile m )
+        {
+			if (m_useStockRestrictions)
+			{
+	            ClientFlags flags = m.NetState == null ? ClientFlags.None : m.NetState.Flags;
+
+    	        if ( Server.Factions.Sigil.ExistsOn( m ) )
+        	    {
+            	    m.SendLocalizedMessage( 1061632 ); // You can't do that while carrying the sigil.
+	            	return;
+				}
+    	        else if ( m_TargetMap == Map.Felucca && m is PlayerMobile && ((PlayerMobile)m).Young )
+        	    {
+            	    m.SendLocalizedMessage( 1049543 ); // You decide against traveling to Felucca while you are still young.
+	            	return;
+				}
+    	        else if ( (m.Kills >= 5 && m_TargetMap != Map.Felucca) || ( m_TargetMap == Map.Tokuno && (flags & ClientFlags.Tokuno) == 0 ) || ( m_TargetMap == Map.Malas && (flags & ClientFlags.Malas) == 0 ) || ( m_TargetMap == Map.Ilshenar && (flags & ClientFlags.Ilshenar) == 0 ) )
+        	    {
+            	    m.SendLocalizedMessage( 1019004 ); // You are not allowed to travel there.
+	            	return;
+				}
+    	        else if ( m.Spell != null )
+        	    {
+            	    m.SendLocalizedMessage( 1049616 ); // You are too busy to do that at the moment.
+	            	return;
+				}
+			}
+            
+			if ( m_TargetMap != null && m_TargetMap != Map.Internal )
+            {
+                BaseCreature.TeleportPets( m, m_Target, m_TargetMap );
+                m.MoveToWorld( m_Target, m_TargetMap );
+
+                if ( m.AccessLevel == AccessLevel.Player || !m.Hidden )
+                    m.PlaySound( 0x1FE );
+
+                OnGateUsed( m );
+            }
+            else
+            {
+                m.SendMessage( "This moongate does not seem to go anywhere." );
+            }
+        }
+
+        public virtual void CheckGate( Mobile m, int range )
+        {
+            #region Mondains Legacy
+            if ( m.Hidden && m.AccessLevel == AccessLevel.Player && Core.ML )
+                m.RevealingAction();
+            #endregion
+
+            new DelayTimer( m, this, range ).Start();
+        }
+
+		public virtual void OnGateUsed( Mobile m )
+		{}
+
+        public static bool IsInTown( Point3D p, Map map )
+        {
+            if ( map == null )
+                return false;
+
+            GuardedRegion reg = (GuardedRegion) Region.Find( p, map ).GetRegion( typeof( GuardedRegion ) );
+
+            return ( reg != null && !reg.IsDisabled() );
+        }
+
+        public virtual void BeginConfirmation( Mobile from )
+        {
+			if ( !m_useStockRestrictions )
+				UseGate( from );
+
+            if ( IsInTown( from.Location, from.Map ) && !IsInTown( m_Target, m_TargetMap ) || (from.Map != Map.Felucca && TargetMap == Map.Felucca && ShowFeluccaWarning) )
+            {
+                if ( from.AccessLevel == AccessLevel.Player || !from.Hidden )
+                    from.Send( new PlaySound( 0x20E, from.Location ) );
+                from.CloseGump( typeof( MoongateConfirmGump ) );
+				Moongate tempGate = new Moongate ( m_Target, m_TargetMap );
+                from.SendGump( new MoongateConfirmGump( from, tempGate ) );
+				tempGate.Delete ();
+            }
+            else
+            {
+                EndConfirmation( from );
+            }
+        }
+
+        public virtual void EndConfirmation( Mobile from )
+        {
+            if ( !ValidateUse( from, true ) )
+                return;
+
+            UseGate( from );
+        }
+
+        public virtual bool ValidateUse( Mobile from, bool message )
+        {
+            if ( from.Deleted || this.Deleted )
+                return false;
+
+            if ( from.Map != this.Map || !from.InRange( this, 1 ) )
+            {
+                if ( message )
+                    from.SendLocalizedMessage( 500446 ); // That is too far away.
+
+                return false;
+            }
+
+            return true;
+        }
+
+        public virtual void DelayCallback( Mobile from, int range )
+        {
+            if ( !ValidateUse( from, false ) || !from.InRange( this, range ) )
+                return;
+
+            if ( m_TargetMap != null )
+                BeginConfirmation( from );
+            else
+                from.SendMessage( "This moongate does not seem to go anywhere." );
+        }
+
+        private class DelayTimer : Timer
+        {
+            private Mobile m_From;
+            private UltimaMoongate m_Gate;
+            private int m_Range;
+
+            public DelayTimer( Mobile from, UltimaMoongate gate, int range ) : base( TimeSpan.FromSeconds( 1.0 ) )
+            {
+                m_From = from;
+                m_Gate = gate;
+                m_Range = range;
+            }
+
+            protected override void OnTick()
+            {
+                m_Gate.DelayCallback( m_From, m_Range );
+            }
+        }
+        
+		private class TransitionTimer : MoongateTransitionTimer
+		{
+			public TransitionTimer (UltimaMoongate gate) : base ( gate ) {}
+			protected override void OnTick ()
+			{
+				if (Gate.ReturnGate)
+				{
+					UltimaMoongate returnGate = new UltimaMoongate (Gate.GetWorldLocation(), Gate.Map, Gate.OpenTime, Gate.Colour, Gate.Dispellable, Gate.StockTravelRestrictions, false);
+					returnGate.MoveToWorld (Gate.Target, Gate.TargetMap);
+				}
+
+				UltimaMoongate_Frame nextGate = new UltimaMoongate_Frame (Gate, MoongateFrame.Frame0, false, GetMoongateFrameID (Gate.Colour, MoongateFrame.Frame0));
+				nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
+			}
+		}
+
+		// Returns the ItemID of an animation frame for a moongate colour. Frame 8 is the pulsating 'open gate'.
+		public static int GetMoongateFrameID (MoongateColour colour, MoongateFrame frame)
+		{
+			if (colour == MoongateColour.Blue)
+			{
+				switch (frame)
+				{
+					case MoongateFrame.Frame0: return 0x1AF4;
+					case MoongateFrame.Frame1: return 0x1AF5;
+					case MoongateFrame.Frame2: return 0x1AF6;
+					case MoongateFrame.Frame3: return 0x1AF7;
+					case MoongateFrame.Frame4: return 0x1AF8;
+					case MoongateFrame.Frame5: return 0x1AF9;
+					case MoongateFrame.Frame6: return 0x1AFA;
+					case MoongateFrame.Frame7: return 0x1AFB;
+					case MoongateFrame.Frame8: return 0x0F6C;
+				}
+			}
+			else if (colour == MoongateColour.Red)
+			{
+	            switch (frame)
+	            {
+	                case MoongateFrame.Frame0: return 0x1AE6;
+	                case MoongateFrame.Frame1: return 0x1AE7;
+	                case MoongateFrame.Frame2: return 0x1AE8;
+	                case MoongateFrame.Frame3: return 0x1AE9;
+	                case MoongateFrame.Frame4: return 0x1AEA;
+	                case MoongateFrame.Frame5: return 0x1AEB;
+	                case MoongateFrame.Frame6: return 0x1AEC;
+	                case MoongateFrame.Frame7: return 0x1AED;
+	                 case MoongateFrame.Frame8: return 0x0DDA;
+	             }
+	         }
+			 else if (colour == MoongateColour.Black)
+			 {
+	             switch (frame)
+	             {
+	                 case MoongateFrame.Frame0: return 0x1FCC;
+	                 case MoongateFrame.Frame1: return 0x1FCD;
+	                 case MoongateFrame.Frame2: return 0x1FCE;
+	                 case MoongateFrame.Frame3: return 0x1FCF;
+	                 case MoongateFrame.Frame4: return 0x1FD0;
+	                 case MoongateFrame.Frame5: return 0x1FD1;
+	                 case MoongateFrame.Frame6: return 0x1FD2;
+	                 case MoongateFrame.Frame7: return 0x1FD3;
+	                 case MoongateFrame.Frame8: return 0x1FD4;
+	             }
+	       	}
+			else if (colour == MoongateColour.Silver)
+			{
+	            switch (frame)
+	            {
+	                case MoongateFrame.Frame0: return 0x1FDF;
+	                case MoongateFrame.Frame1: return 0x1FE0;
+	                case MoongateFrame.Frame2: return 0x1FE1;
+	                case MoongateFrame.Frame3: return 0x1FE2;
+	                case MoongateFrame.Frame4: return 0x1FE3;
+	                case MoongateFrame.Frame5: return 0x1FE4;
+	                case MoongateFrame.Frame6: return 0x1FE5;
+	                case MoongateFrame.Frame7: return 0x1FE6;
+	                case MoongateFrame.Frame8: return 0x1FE7;
+	            }
+			}
+	
+			return 0;
+		}
 	}
 
-	public class UltimaMoongate_Frame_Base : Item
+	public class UltimaMoongate_Frame : Item
 	{
 		public Timer GateTimer = null;
-		private UltimaMoongate_Base m_baseGate = null;
+		private UltimaMoongate m_baseGate = null;
+		private MoongateFrame m_Frame;
 		private bool m_reverse = false;
 		public static TimeSpan MoongateTransitionTime = TimeSpan.FromSeconds (0.25);
 
 		[Constructable]
-		public UltimaMoongate_Frame_Base (UltimaMoongate_Base gate, bool reverse = false, int itemid = 0x1AF4) : base (itemid)
+		public UltimaMoongate_Frame (UltimaMoongate gate, MoongateFrame frame = MoongateFrame.Frame8, bool reverse = false, int itemid = 0x0F6C) : base (itemid)
 		{
 			m_baseGate = gate;
+			m_Frame = frame;
 			m_baseGate.currentGate = this;
 			m_reverse = reverse;
 			
 			Movable = false;
 			Visible = true;
+			Light = LightType.Circle300;
+
+			if (m_Frame == MoongateFrame.Frame8)
+			{	
+				m_baseGate.gateOpened = true;
+				
+				if (gate.OpenTime > 0)
+				{
+					GateTimer = new TransitionTimer (gate, this, true, gate.OpenTime);
+					GateTimer.Start();
+				}
+			}
+			else
+			{
+				GateTimer = new TransitionTimer (gate, this, reverse);
+	            GateTimer.Start();
+			}
 		}
-		public UltimaMoongate_Frame_Base (Serial serial) : base (serial)  {}
+		public UltimaMoongate_Frame (Serial serial) : base (serial)  {}
 		public override void Serialize( GenericWriter writer )		{}
 		public override void Deserialize( GenericReader reader )	{}
 		
-		public UltimaMoongate_Base BaseGate
+		public MoongateFrame Frame { get { return m_Frame; } }
+		public UltimaMoongate BaseGate
 		{
 			get { return m_baseGate; }
 			set { m_baseGate = value; }
@@ -250,1309 +498,114 @@ namespace Warped.Items
 			get { return m_reverse; }
 			set { m_reverse = value; }
 		}
-	}
 
-#region BlueMoongateAnimation
-	public class UltimaMoongate_Blue : UltimaMoongate_Base
-	{
-		[Constructable]
-		public UltimaMoongate_Blue (Point3D target, Map map, double opentime, bool dispell = false, bool restrict = false, bool returngate = false) : base( target, map, opentime, dispell, restrict, returngate)
+		public override void OnDoubleClick( Mobile from )
 		{
-			initGate ();
-		}
-		[Constructable]
-		public UltimaMoongate_Blue (double opentime) : base (opentime)
-		{
-			initGate ();
-		}
-		public UltimaMoongate_Blue( Serial serial ) : base( serial ) {}
+			if (m_Frame != MoongateFrame.Frame8)
+				return;
 
-		public virtual void initGate ()
-		{
-			Name = "Manager for a Blue UltimaMoongate.";
-			gateTimer = new TransitionTimer (this);
-			gateTimer.Start();
-		}
+			if (!m_baseGate.gateOpened)
+				return;
 
-		public override void Serialize( GenericWriter writer ) { base.Serialize ( writer ); }
-		public override void Deserialize( GenericReader reader )
-		{
-			base.Deserialize ( reader );
-			
-			if (OpenTime > 0)
-				currentGate = new UltimaMoongate_Blue_Frame8 (this);
-			else
-				this.Delete ();
-		}
+			if ( !from.Player )
+                return;
 
-		private class TransitionTimer : MoongateTransitionTimer
-		{
-			public TransitionTimer (UltimaMoongate_Base gate) : base ( gate ) {}
-			protected override void OnTick ()
+			// Double-clicking a gate for a gump only works if the gate is using the stock restrictions
+			if (m_baseGate.StockTravelRestrictions)
 			{
-				if (Gate.ReturnGate)
+            	if ( from.InRange( GetWorldLocation(), 1 ) )
+                	m_baseGate.CheckGate( from, 1 );
+            	else
+                	from.SendLocalizedMessage( 500446 ); // That is too far away.
+        	}
+		}
+
+        private class TransitionTimer : MoongateTransitionTimer
+        {
+            public TransitionTimer (UltimaMoongate gate, UltimaMoongate_Frame thisgate, bool reverse = false, double opentime = 0.25) : base ( gate, thisgate, reverse, opentime ) {}
+            protected override void OnTick ()
+            {
+                UltimaMoongate_Frame nextGate = null;
+
+				int nextFrame = (int)ThisGate.Frame + 1;
+				int prevFrame = (int)ThisGate.Frame - 1;
+
+				// If this is frame 0, continue opening or delete, depending on reverse
+				if ( ThisGate.Frame == MoongateFrame.Frame0 )
 				{
-					UltimaMoongate_Base returnGate = new UltimaMoongate_Blue (Gate.GetWorldLocation(), Gate.Map, Gate.OpenTime, Gate.Dispellable, Gate.StockTravelRestrictions, false);
-					returnGate.MoveToWorld (Gate.Target, Gate.TargetMap);
+                	if (!Reverse)
+                	{
+                    	nextGate = new UltimaMoongate_Frame (Gate, (MoongateFrame)nextFrame, false, UltimaMoongate.GetMoongateFrameID (Gate.Colour, (MoongateFrame)nextFrame));
+                    	nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
+                    	ThisGate.Delete ();
+                	}
+                	else
+                	{
+                    	Gate.Delete ();
+                    	ThisGate.Delete ();
+                	}
 				}
-
-				UltimaMoongate_Frame_Base nextGate = new UltimaMoongate_Blue_Frame0 (Gate);
-				nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
-			}
-		}
-	}
-
-	public class UltimaMoongate_Blue_Frame0 : UltimaMoongate_Frame_Base
-	{
-		[Constructable]
-		public UltimaMoongate_Blue_Frame0 (UltimaMoongate_Base gate, bool reverse = false) : base (gate, reverse, 0x1AF4)
-		{
-			gate.currentGate = this;
-			GateTimer = new TransitionTimer (gate, this, reverse);
-			GateTimer.Start();
-		}
-		public UltimaMoongate_Blue_Frame0 (Serial serial) : base (serial) {}
-		public override void Serialize( GenericWriter writer )		{}
-		public override void Deserialize( GenericReader reader )	{}
-		
-		private class TransitionTimer : MoongateTransitionTimer
-		{
-			public TransitionTimer (UltimaMoongate_Base gate, UltimaMoongate_Frame_Base thisgate, bool reverse = false) : base ( gate, thisgate, reverse ) {}			
-			protected override void OnTick ()
-			{
-				UltimaMoongate_Frame_Base nextGate = null;
 				
-				if (!Reverse)
+				// If this is frame 8, begin reversing the animation.
+				else if ( ThisGate.Frame == MoongateFrame.Frame8 )
 				{
-					nextGate = new UltimaMoongate_Blue_Frame1 (Gate);
-					nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
-					ThisGate.Delete ();
+                	Gate.gateOpened = false;
+                	nextGate = new UltimaMoongate_Frame (Gate, (MoongateFrame)prevFrame, true, UltimaMoongate.GetMoongateFrameID (Gate.Colour, (MoongateFrame)prevFrame));
+                	nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
+                	ThisGate.Delete ();
 				}
-				else
-				{	
-					Gate.Delete ();
-					ThisGate.Delete ();
-				}
-			}
-		}
-	}
-	public class UltimaMoongate_Blue_Frame1 : UltimaMoongate_Frame_Base
-	{
-		[Constructable]
-		public UltimaMoongate_Blue_Frame1 (UltimaMoongate_Base gate, bool reverse = false) : base (gate, reverse, 0x1AF5)
-		{
-			gate.currentGate = this;
-			GateTimer = new TransitionTimer (gate, this, reverse);
-			GateTimer.Start();
-		}
-		public UltimaMoongate_Blue_Frame1 (Serial serial) : base (serial)  {}
-		public override void Serialize( GenericWriter writer )		{}
-		public override void Deserialize( GenericReader reader )	{}
-		
-		private class TransitionTimer : MoongateTransitionTimer
-		{
-			public TransitionTimer ( UltimaMoongate_Base gate, UltimaMoongate_Frame_Base thisgate, bool reverse = false) : base ( gate, thisgate, reverse ) {}
-			protected override void OnTick ()
-			{
-				UltimaMoongate_Frame_Base nextGate = null;
-				
-				if (!Reverse)
-					nextGate = new UltimaMoongate_Blue_Frame2 (Gate);
-				else
-					nextGate = new UltimaMoongate_Blue_Frame0 (Gate, true);
-				
-				nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
-				ThisGate.Delete ();
-			}
-		}
-	}
-	public class UltimaMoongate_Blue_Frame2 : UltimaMoongate_Frame_Base
-	{
-		[Constructable]
-		public UltimaMoongate_Blue_Frame2 (UltimaMoongate_Base gate, bool reverse = false) : base (gate, reverse, 0x1AF6)
-		{
-			gate.currentGate = this;
-			GateTimer = new TransitionTimer (gate, this, reverse);
-			GateTimer.Start();
-		}
-		public UltimaMoongate_Blue_Frame2 (Serial serial) : base (serial)  {}
-		public override void Serialize( GenericWriter writer )		{}
-		public override void Deserialize( GenericReader reader )	{}
-		
-		private class TransitionTimer : MoongateTransitionTimer
-		{
-			public TransitionTimer ( UltimaMoongate_Base gate, UltimaMoongate_Frame_Base thisgate, bool reverse = false) : base ( gate, thisgate, reverse ) {}
-			protected override void OnTick ()
-			{
-				UltimaMoongate_Frame_Base nextGate = null;
-				
-				if (!Reverse)
-					nextGate = new UltimaMoongate_Blue_Frame3 (Gate);
-				else
-					nextGate = new UltimaMoongate_Blue_Frame1 (Gate, true);
-				
-				nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
-				ThisGate.Delete ();
-			}
-		}
-	}
-	public class UltimaMoongate_Blue_Frame3 : UltimaMoongate_Frame_Base
-	{
-		[Constructable]
-		public UltimaMoongate_Blue_Frame3 (UltimaMoongate_Base gate, bool reverse = false) : base (gate, reverse, 0x1AF7)
-		{
-			gate.currentGate = this;
-			GateTimer = new TransitionTimer (gate, this, reverse);
-			GateTimer.Start();
-		}
-		public UltimaMoongate_Blue_Frame3 (Serial serial) : base (serial)  {}
-		public override void Serialize( GenericWriter writer )		{}
-		public override void Deserialize( GenericReader reader )	{}
-		
-		private class TransitionTimer : MoongateTransitionTimer
-		{
-			public TransitionTimer ( UltimaMoongate_Base gate, UltimaMoongate_Frame_Base thisgate, bool reverse = false) : base ( gate, thisgate, reverse ) {}
-			protected override void OnTick ()
-			{
-				UltimaMoongate_Frame_Base nextGate = null;
-				
-				if (!Reverse)
-					nextGate = new UltimaMoongate_Blue_Frame4 (Gate);
-				else
-					nextGate = new UltimaMoongate_Blue_Frame2 (Gate, true);
-				
-				nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
-				ThisGate.Delete ();
-			}
-		}
-	}
-	public class UltimaMoongate_Blue_Frame4 : UltimaMoongate_Frame_Base
-	{
-		[Constructable]
-		public UltimaMoongate_Blue_Frame4 (UltimaMoongate_Base gate, bool reverse = false) : base (gate, reverse, 0x1AF8)
-		{
-			gate.currentGate = this;
-			GateTimer = new TransitionTimer (gate, this, reverse);
-			GateTimer.Start();
-		}
-		public UltimaMoongate_Blue_Frame4 (Serial serial) : base (serial)  {}
-		public override void Serialize( GenericWriter writer )		{}
-		public override void Deserialize( GenericReader reader )	{}
-		
-		private class TransitionTimer : MoongateTransitionTimer
-		{
-			public TransitionTimer ( UltimaMoongate_Base gate, UltimaMoongate_Frame_Base thisgate, bool reverse = false) : base ( gate, thisgate, reverse ) {}
-			protected override void OnTick ()
-			{
-				UltimaMoongate_Frame_Base nextGate = null;
-				
-				if (!Reverse)
-					nextGate = new UltimaMoongate_Blue_Frame5 (Gate);
-				else
-					nextGate = new UltimaMoongate_Blue_Frame3 (Gate, true);
-				
-				nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
-				ThisGate.Delete ();
-			}
-		}
-	}
-	public class UltimaMoongate_Blue_Frame5 : UltimaMoongate_Frame_Base
-	{
-		[Constructable]
-		public UltimaMoongate_Blue_Frame5 (UltimaMoongate_Base gate, bool reverse = false) : base (gate, reverse, 0x1AF9)
-		{
-			gate.currentGate = this;
-			GateTimer = new TransitionTimer (gate, this, reverse);
-			GateTimer.Start();
-		}
-		public UltimaMoongate_Blue_Frame5 (Serial serial) : base (serial)  {}
-		public override void Serialize( GenericWriter writer )		{}
-		public override void Deserialize( GenericReader reader )	{}
-		
-		private class TransitionTimer : MoongateTransitionTimer
-		{
-			public TransitionTimer ( UltimaMoongate_Base gate, UltimaMoongate_Frame_Base thisgate, bool reverse = false) : base ( gate, thisgate, reverse ) {}
-			protected override void OnTick ()
-			{
-				UltimaMoongate_Frame_Base nextGate = null;
-				
-				if (!Reverse)
-					nextGate = new UltimaMoongate_Blue_Frame6 (Gate);
-				else
-					nextGate = new UltimaMoongate_Blue_Frame4 (Gate, true);
-				
-				nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
-				ThisGate.Delete ();
-			}
-		}
-	}
-	public class UltimaMoongate_Blue_Frame6 : UltimaMoongate_Frame_Base
-	{
-		[Constructable]
-		public UltimaMoongate_Blue_Frame6 (UltimaMoongate_Base gate, bool reverse = false) : base (gate, reverse, 0x1AFA)
-		{
-			gate.currentGate = this;
-			GateTimer = new TransitionTimer (gate, this, reverse);
-			GateTimer.Start();
-		}
-		public UltimaMoongate_Blue_Frame6 (Serial serial) : base (serial)  {}
-		public override void Serialize( GenericWriter writer )		{}
-		public override void Deserialize( GenericReader reader )	{}
-		
-		private class TransitionTimer : MoongateTransitionTimer
-		{
-			public TransitionTimer ( UltimaMoongate_Base gate, UltimaMoongate_Frame_Base thisgate, bool reverse = false) : base ( gate, thisgate, reverse ) {}
-			protected override void OnTick ()
-			{
-				UltimaMoongate_Frame_Base nextGate = null;
-				
-				if (!Reverse)
-					nextGate = new UltimaMoongate_Blue_Frame7 (Gate);
-				else
-					nextGate = new UltimaMoongate_Blue_Frame5 (Gate, true);
-				
-				nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
-				ThisGate.Delete ();	
-			}
-		}
-	}
-	public class UltimaMoongate_Blue_Frame7 : UltimaMoongate_Frame_Base
-	{
-		[Constructable]
-		public UltimaMoongate_Blue_Frame7 (UltimaMoongate_Base gate, bool reverse = false) : base (gate, reverse, 0x1AFB)
-		{
-			gate.currentGate = this;
-			GateTimer = new TransitionTimer (gate, this, reverse);
-			GateTimer.Start();
-		}
-		public UltimaMoongate_Blue_Frame7 (Serial serial) : base (serial)  {}
-		public override void Serialize( GenericWriter writer )		{}
-		public override void Deserialize( GenericReader reader )	{}
-		
-		private class TransitionTimer : MoongateTransitionTimer
-		{
-			public TransitionTimer ( UltimaMoongate_Base gate, UltimaMoongate_Frame_Base thisgate, bool reverse = false) : base ( gate, thisgate, reverse ) {}
-			protected override void OnTick ()
-			{
-				UltimaMoongate_Frame_Base nextGate = null;
-				
-				if (!Reverse)
-					nextGate = new UltimaMoongate_Blue_Frame8 (Gate);
-				else
-					nextGate = new UltimaMoongate_Blue_Frame6 (Gate, true);
-				
-				nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
-				ThisGate.Delete ();
-			}
-		}
-	}
-	public class UltimaMoongate_Blue_Frame8 : UltimaMoongate_Frame_Base
-	{
-		[Constructable]
-		public UltimaMoongate_Blue_Frame8 (UltimaMoongate_Base gate, bool reverse = false) : base (gate, reverse, 0x0F6C)
-		{
-			gate.currentGate = this;
-			gate.gateOpened = true;
-			if (gate.OpenTime > 0)
-			{
-				GateTimer = new TransitionTimer (gate, this, true, gate.OpenTime);
-				GateTimer.Start ();
-			}
-		}
-		
-		public UltimaMoongate_Blue_Frame8 (Serial serial) : base (serial)  {}
-		public override void Serialize( GenericWriter writer )		{}
-		public override void Deserialize( GenericReader reader )	{}
-		
-		private class TransitionTimer : MoongateTransitionTimer
-		{
-			public TransitionTimer ( UltimaMoongate_Base gate, UltimaMoongate_Frame_Base thisgate, bool reverse = false, double opentime = 0.25)  : base ( gate, thisgate, reverse, opentime ) {}
-			protected override void OnTick ()
-			{
-				Gate.gateOpened = false;
-				UltimaMoongate_Frame_Base nextGate = new UltimaMoongate_Blue_Frame7 (Gate, true);
-				nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
-				ThisGate.Delete ();
-			}
-		}
-	}
-#endregion
 
-#region RedMoongateAnimation
-	public class UltimaMoongate_Red : UltimaMoongate_Base
-	{
-		[Constructable]
-		public UltimaMoongate_Red (Point3D target, Map map, double opentime, bool dispell = false, bool restrict = false, bool returngate = false) : base( target, map, opentime, dispell, restrict, returngate)
-		{
-			initGate ();
-		}
-		[Constructable]
-		public UltimaMoongate_Red (double opentime) : base (opentime)
-		{
-			initGate ();
-		}
-		public UltimaMoongate_Red( Serial serial ) : base( serial ) {}
-
-		public virtual void initGate ()
-		{
-			Name = "Manager for a Red UltimaMoongate.";
-			gateTimer = new TransitionTimer (this);
-			gateTimer.Start();
-		}
-
-		public override void Serialize( GenericWriter writer ) { base.Serialize ( writer ); }
-		public override void Deserialize( GenericReader reader )
-		{
-			base.Deserialize ( reader );
-			
-			if (OpenTime > 0)
-				currentGate = new UltimaMoongate_Red_Frame8 (this);
-			else
-				this.Delete ();
-		}
-
-		private class TransitionTimer : MoongateTransitionTimer
-		{
-			public TransitionTimer (UltimaMoongate_Base gate) : base ( gate ) {}
-			protected override void OnTick ()
-			{
-				if (Gate.ReturnGate)
+				// Otherwise, advance or retreat through animation sequence
+				else
 				{
-					UltimaMoongate_Base returnGate = new UltimaMoongate_Red (Gate.GetWorldLocation(), Gate.Map, Gate.OpenTime, Gate.Dispellable, Gate.StockTravelRestrictions, false);
-					returnGate.MoveToWorld (Gate.Target, Gate.TargetMap);
+                	if (!Reverse)
+                		nextGate = new UltimaMoongate_Frame (Gate, (MoongateFrame)nextFrame, false, UltimaMoongate.GetMoongateFrameID (Gate.Colour, (MoongateFrame)nextFrame));
+					else
+                    	nextGate = new UltimaMoongate_Frame (Gate, (MoongateFrame)prevFrame, true, UltimaMoongate.GetMoongateFrameID (Gate.Colour, (MoongateFrame)prevFrame));
+
+                	nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
+                	ThisGate.Delete ();
 				}
+            }
+        }
+    }
 
-				UltimaMoongate_Frame_Base nextGate = new UltimaMoongate_Red_Frame0 (Gate);
-				nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
-			}
-		}
-	}
+	// This is the timer used by all the moongate frames, to cycle through the rising / falling animations.
+	public class MoongateTransitionTimer : Timer
+	{
+		private bool m_reverse = false;
+		private UltimaMoongate m_Gate;
+		private UltimaMoongate_Frame m_thisGate;
 
-	public class UltimaMoongate_Red_Frame0 : UltimaMoongate_Frame_Base
-	{
-		[Constructable]
-		public UltimaMoongate_Red_Frame0 (UltimaMoongate_Base gate, bool reverse = false) : base (gate, reverse, 0x1AE6)
+		public MoongateTransitionTimer (UltimaMoongate gate, bool reverse = false) : base ( TimeSpan.FromSeconds (0.25) )
 		{
-			gate.currentGate = this;
-			GateTimer = new TransitionTimer (gate, this, reverse);
-			GateTimer.Start();
+			m_Gate = gate;
+			m_reverse = reverse;
+			Priority = TimerPriority.TwentyFiveMS;
 		}
-		public UltimaMoongate_Red_Frame0 (Serial serial) : base (serial) {}
-		public override void Serialize( GenericWriter writer )		{}
-		public override void Deserialize( GenericReader reader )	{}
 		
-		private class TransitionTimer : MoongateTransitionTimer
+		public MoongateTransitionTimer (UltimaMoongate gate, UltimaMoongate_Frame thisgate, bool reverse = false, double opentime = 0.25) : base ( TimeSpan.FromSeconds (opentime) )
 		{
-			public TransitionTimer (UltimaMoongate_Base gate, UltimaMoongate_Frame_Base thisgate, bool reverse = false) : base ( gate, thisgate, reverse ) {}			
-			protected override void OnTick ()
-			{
-				UltimaMoongate_Frame_Base nextGate = null;
-				
-				if (!Reverse)
-				{
-					nextGate = new UltimaMoongate_Red_Frame1 (Gate);
-					nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
-					ThisGate.Delete ();
-				}
-				else
-				{	
-					Gate.Delete ();
-					ThisGate.Delete ();
-				}
-			}
+			m_Gate = gate;
+			m_thisGate = thisgate;
+			m_reverse = reverse;
+			Priority = TimerPriority.TwentyFiveMS;
+		}
+		
+		public bool Reverse
+		{
+			get { return m_reverse; }
+			set { m_reverse = value; }
+		}
+		public UltimaMoongate Gate
+		{
+			get { return m_Gate; }
+			set { m_Gate = value; }
+		}
+		public UltimaMoongate_Frame ThisGate
+		{
+			get { return m_thisGate; }
+			set { m_thisGate = value; }
 		}
 	}
-	public class UltimaMoongate_Red_Frame1 : UltimaMoongate_Frame_Base
-	{
-		[Constructable]
-		public UltimaMoongate_Red_Frame1 (UltimaMoongate_Base gate, bool reverse = false) : base (gate, reverse, 0x1AE7)
-		{
-			gate.currentGate = this;
-			GateTimer = new TransitionTimer (gate, this, reverse);
-			GateTimer.Start();
-		}
-		public UltimaMoongate_Red_Frame1 (Serial serial) : base (serial)  {}
-		public override void Serialize( GenericWriter writer )		{}
-		public override void Deserialize( GenericReader reader )	{}
-		
-		private class TransitionTimer : MoongateTransitionTimer
-		{
-			public TransitionTimer ( UltimaMoongate_Base gate, UltimaMoongate_Frame_Base thisgate, bool reverse = false) : base ( gate, thisgate, reverse ) {}
-			protected override void OnTick ()
-			{
-				UltimaMoongate_Frame_Base nextGate = null;
-				
-				if (!Reverse)
-					nextGate = new UltimaMoongate_Red_Frame2 (Gate);
-				else
-					nextGate = new UltimaMoongate_Red_Frame0 (Gate, true);
-				
-				nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
-				ThisGate.Delete ();
-			}
-		}
-	}
-	public class UltimaMoongate_Red_Frame2 : UltimaMoongate_Frame_Base
-	{
-		[Constructable]
-		public UltimaMoongate_Red_Frame2 (UltimaMoongate_Base gate, bool reverse = false) : base (gate, reverse, 0x1AE8)
-		{
-			gate.currentGate = this;
-			GateTimer = new TransitionTimer (gate, this, reverse);
-			GateTimer.Start();
-		}
-		public UltimaMoongate_Red_Frame2 (Serial serial) : base (serial)  {}
-		public override void Serialize( GenericWriter writer )		{}
-		public override void Deserialize( GenericReader reader )	{}
-		
-		private class TransitionTimer : MoongateTransitionTimer
-		{
-			public TransitionTimer ( UltimaMoongate_Base gate, UltimaMoongate_Frame_Base thisgate, bool reverse = false) : base ( gate, thisgate, reverse ) {}
-			protected override void OnTick ()
-			{
-				UltimaMoongate_Frame_Base nextGate = null;
-				
-				if (!Reverse)
-					nextGate = new UltimaMoongate_Red_Frame3 (Gate);
-				else
-					nextGate = new UltimaMoongate_Red_Frame1 (Gate, true);
-				
-				nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
-				ThisGate.Delete ();
-			}
-		}
-	}
-	public class UltimaMoongate_Red_Frame3 : UltimaMoongate_Frame_Base
-	{
-		[Constructable]
-		public UltimaMoongate_Red_Frame3 (UltimaMoongate_Base gate, bool reverse = false) : base (gate, reverse, 0x1AE9)
-		{
-			gate.currentGate = this;
-			GateTimer = new TransitionTimer (gate, this, reverse);
-			GateTimer.Start();
-		}
-		public UltimaMoongate_Red_Frame3 (Serial serial) : base (serial)  {}
-		public override void Serialize( GenericWriter writer )		{}
-		public override void Deserialize( GenericReader reader )	{}
-		
-		private class TransitionTimer : MoongateTransitionTimer
-		{
-			public TransitionTimer ( UltimaMoongate_Base gate, UltimaMoongate_Frame_Base thisgate, bool reverse = false) : base ( gate, thisgate, reverse ) {}
-			protected override void OnTick ()
-			{
-				UltimaMoongate_Frame_Base nextGate = null;
-				
-				if (!Reverse)
-					nextGate = new UltimaMoongate_Red_Frame4 (Gate);
-				else
-					nextGate = new UltimaMoongate_Red_Frame2 (Gate, true);
-				
-				nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
-				ThisGate.Delete ();
-			}
-		}
-	}
-	public class UltimaMoongate_Red_Frame4 : UltimaMoongate_Frame_Base
-	{
-		[Constructable]
-		public UltimaMoongate_Red_Frame4 (UltimaMoongate_Base gate, bool reverse = false) : base (gate, reverse, 0x1AEA)
-		{
-			gate.currentGate = this;
-			GateTimer = new TransitionTimer (gate, this, reverse);
-			GateTimer.Start();
-		}
-		public UltimaMoongate_Red_Frame4 (Serial serial) : base (serial)  {}
-		public override void Serialize( GenericWriter writer )		{}
-		public override void Deserialize( GenericReader reader )	{}
-		
-		private class TransitionTimer : MoongateTransitionTimer
-		{
-			public TransitionTimer ( UltimaMoongate_Base gate, UltimaMoongate_Frame_Base thisgate, bool reverse = false) : base ( gate, thisgate, reverse ) {}
-			protected override void OnTick ()
-			{
-				UltimaMoongate_Frame_Base nextGate = null;
-				
-				if (!Reverse)
-					nextGate = new UltimaMoongate_Red_Frame5 (Gate);
-				else
-					nextGate = new UltimaMoongate_Red_Frame3 (Gate, true);
-				
-				nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
-				ThisGate.Delete ();
-			}
-		}
-	}
-	public class UltimaMoongate_Red_Frame5 : UltimaMoongate_Frame_Base
-	{
-		[Constructable]
-		public UltimaMoongate_Red_Frame5 (UltimaMoongate_Base gate, bool reverse = false) : base (gate, reverse, 0x1AEB)
-		{
-			gate.currentGate = this;
-			GateTimer = new TransitionTimer (gate, this, reverse);
-			GateTimer.Start();
-		}
-		public UltimaMoongate_Red_Frame5 (Serial serial) : base (serial)  {}
-		public override void Serialize( GenericWriter writer )		{}
-		public override void Deserialize( GenericReader reader )	{}
-		
-		private class TransitionTimer : MoongateTransitionTimer
-		{
-			public TransitionTimer ( UltimaMoongate_Base gate, UltimaMoongate_Frame_Base thisgate, bool reverse = false) : base ( gate, thisgate, reverse ) {}
-			protected override void OnTick ()
-			{
-				UltimaMoongate_Frame_Base nextGate = null;
-				
-				if (!Reverse)
-					nextGate = new UltimaMoongate_Red_Frame6 (Gate);
-				else
-					nextGate = new UltimaMoongate_Red_Frame4 (Gate, true);
-				
-				nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
-				ThisGate.Delete ();
-			}
-		}
-	}
-	public class UltimaMoongate_Red_Frame6 : UltimaMoongate_Frame_Base
-	{
-		[Constructable]
-		public UltimaMoongate_Red_Frame6 (UltimaMoongate_Base gate, bool reverse = false) : base (gate, reverse, 0x1AEC)
-		{
-			gate.currentGate = this;
-			GateTimer = new TransitionTimer (gate, this, reverse);
-			GateTimer.Start();
-		}
-		public UltimaMoongate_Red_Frame6 (Serial serial) : base (serial)  {}
-		public override void Serialize( GenericWriter writer )		{}
-		public override void Deserialize( GenericReader reader )	{}
-		
-		private class TransitionTimer : MoongateTransitionTimer
-		{
-			public TransitionTimer ( UltimaMoongate_Base gate, UltimaMoongate_Frame_Base thisgate, bool reverse = false) : base ( gate, thisgate, reverse ) {}
-			protected override void OnTick ()
-			{
-				UltimaMoongate_Frame_Base nextGate = null;
-				
-				if (!Reverse)
-					nextGate = new UltimaMoongate_Red_Frame7 (Gate);
-				else
-					nextGate = new UltimaMoongate_Red_Frame5 (Gate, true);
-				
-				nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
-				ThisGate.Delete ();	
-			}
-		}
-	}
-	public class UltimaMoongate_Red_Frame7 : UltimaMoongate_Frame_Base
-	{
-		[Constructable]
-		public UltimaMoongate_Red_Frame7 (UltimaMoongate_Base gate, bool reverse = false) : base (gate, reverse, 0x1AED)
-		{
-			gate.currentGate = this;
-			GateTimer = new TransitionTimer (gate, this, reverse);
-			GateTimer.Start();
-		}
-		public UltimaMoongate_Red_Frame7 (Serial serial) : base (serial)  {}
-		public override void Serialize( GenericWriter writer )		{}
-		public override void Deserialize( GenericReader reader )	{}
-		
-		private class TransitionTimer : MoongateTransitionTimer
-		{
-			public TransitionTimer ( UltimaMoongate_Base gate, UltimaMoongate_Frame_Base thisgate, bool reverse = false) : base ( gate, thisgate, reverse ) {}
-			protected override void OnTick ()
-			{
-				UltimaMoongate_Frame_Base nextGate = null;
-				
-				if (!Reverse)
-					nextGate = new UltimaMoongate_Red_Frame8 (Gate);
-				else
-					nextGate = new UltimaMoongate_Red_Frame6 (Gate, true);
-				
-				nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
-				ThisGate.Delete ();
-			}
-		}
-	}
-	public class UltimaMoongate_Red_Frame8 : UltimaMoongate_Frame_Base
-	{
-		[Constructable]
-		public UltimaMoongate_Red_Frame8 (UltimaMoongate_Base gate, bool reverse = false) : base (gate, reverse, 0x0DDA)
-		{
-			gate.currentGate = this;
-			gate.gateOpened = true;
-			if (gate.OpenTime > 0)
-			{
-				GateTimer = new TransitionTimer (gate, this, true, gate.OpenTime);
-				GateTimer.Start ();
-			}
-		}
-		
-		public UltimaMoongate_Red_Frame8 (Serial serial) : base (serial)  {}
-		public override void Serialize( GenericWriter writer )		{}
-		public override void Deserialize( GenericReader reader )	{}
-		
-		private class TransitionTimer : MoongateTransitionTimer
-		{
-			public TransitionTimer ( UltimaMoongate_Base gate, UltimaMoongate_Frame_Base thisgate, bool reverse = false, double opentime = 0.25)  : base ( gate, thisgate, reverse, opentime ) {}
-			protected override void OnTick ()
-			{
-				Gate.gateOpened = false;
-				UltimaMoongate_Frame_Base nextGate = new UltimaMoongate_Red_Frame7 (Gate, true);
-				nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
-				ThisGate.Delete ();
-			}
-		}
-	}
-#endregion
-
-#region BlackMoongateAnimation
-	public class UltimaMoongate_Black : UltimaMoongate_Base
-	{
-		[Constructable]
-		public UltimaMoongate_Black (Point3D target, Map map, double opentime, bool dispell = false, bool restrict = false, bool returngate = false) : base( target, map, opentime, dispell, restrict, returngate)
-		{
-			initGate ();
-		}
-		[Constructable]
-		public UltimaMoongate_Black (double opentime) : base (opentime)
-		{
-			initGate ();
-		}
-		public UltimaMoongate_Black( Serial serial ) : base( serial ) {}
-
-		public virtual void initGate ()
-		{
-			Name = "Manager for a Black UltimaMoongate.";
-			gateTimer = new TransitionTimer (this);
-			gateTimer.Start();
-		}
-
-		public override void Serialize( GenericWriter writer ) { base.Serialize ( writer ); }
-		public override void Deserialize( GenericReader reader )
-		{
-			base.Deserialize ( reader );
-			
-			if (OpenTime > 0)
-				currentGate = new UltimaMoongate_Black_Frame8 (this);
-			else
-				this.Delete ();
-		}
-
-		private class TransitionTimer : MoongateTransitionTimer
-		{
-			public TransitionTimer (UltimaMoongate_Base gate) : base ( gate ) {}
-			protected override void OnTick ()
-			{
-				if (Gate.ReturnGate)
-				{
-					UltimaMoongate_Base returnGate = new UltimaMoongate_Black (Gate.GetWorldLocation(), Gate.Map, Gate.OpenTime, Gate.Dispellable, Gate.StockTravelRestrictions, false);
-					returnGate.MoveToWorld (Gate.Target, Gate.TargetMap);
-				}
-
-				UltimaMoongate_Frame_Base nextGate = new UltimaMoongate_Black_Frame0 (Gate);
-				nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
-			}
-		}
-	}
-
-	public class UltimaMoongate_Black_Frame0 : UltimaMoongate_Frame_Base
-	{
-		[Constructable]
-		public UltimaMoongate_Black_Frame0 (UltimaMoongate_Base gate, bool reverse = false) : base (gate, reverse, 0x1FCC)
-		{
-			gate.currentGate = this;
-			GateTimer = new TransitionTimer (gate, this, reverse);
-			GateTimer.Start();
-		}
-		public UltimaMoongate_Black_Frame0 (Serial serial) : base (serial) {}
-		public override void Serialize( GenericWriter writer )		{}
-		public override void Deserialize( GenericReader reader )	{}
-		
-		private class TransitionTimer : MoongateTransitionTimer
-		{
-			public TransitionTimer (UltimaMoongate_Base gate, UltimaMoongate_Frame_Base thisgate, bool reverse = false) : base ( gate, thisgate, reverse ) {}			
-			protected override void OnTick ()
-			{
-				UltimaMoongate_Frame_Base nextGate = null;
-				
-				if (!Reverse)
-				{
-					nextGate = new UltimaMoongate_Black_Frame1 (Gate);
-					nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
-					ThisGate.Delete ();
-				}
-				else
-				{	
-					Gate.Delete ();
-					ThisGate.Delete ();
-				}
-			}
-		}
-	}
-	public class UltimaMoongate_Black_Frame1 : UltimaMoongate_Frame_Base
-	{
-		[Constructable]
-		public UltimaMoongate_Black_Frame1 (UltimaMoongate_Base gate, bool reverse = false) : base (gate, reverse, 0x1FCD)
-		{
-			gate.currentGate = this;
-			GateTimer = new TransitionTimer (gate, this, reverse);
-			GateTimer.Start();
-		}
-		public UltimaMoongate_Black_Frame1 (Serial serial) : base (serial)	{}
-		public override void Serialize( GenericWriter writer )		{}
-		public override void Deserialize( GenericReader reader )	{}
-		
-		private class TransitionTimer : MoongateTransitionTimer
-		{
-			public TransitionTimer ( UltimaMoongate_Base gate, UltimaMoongate_Frame_Base thisgate, bool reverse = false) : base ( gate, thisgate, reverse ) {}
-			protected override void OnTick ()
-			{
-				UltimaMoongate_Frame_Base nextGate = null;
-				
-				if (!Reverse)
-					nextGate = new UltimaMoongate_Black_Frame2 (Gate);
-				else
-					nextGate = new UltimaMoongate_Black_Frame0 (Gate, true);
-				
-				nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
-				ThisGate.Delete ();
-			}
-		}
-	}
-	public class UltimaMoongate_Black_Frame2 : UltimaMoongate_Frame_Base
-	{
-		[Constructable]
-		public UltimaMoongate_Black_Frame2 (UltimaMoongate_Base gate, bool reverse = false) : base (gate, reverse, 0x1FCE)
-		{
-			gate.currentGate = this;
-			GateTimer = new TransitionTimer (gate, this, reverse);
-			GateTimer.Start();
-		}
-		public UltimaMoongate_Black_Frame2 (Serial serial) : base (serial)	{}
-		public override void Serialize( GenericWriter writer )		{}
-		public override void Deserialize( GenericReader reader )	{}
-		
-		private class TransitionTimer : MoongateTransitionTimer
-		{
-			public TransitionTimer ( UltimaMoongate_Base gate, UltimaMoongate_Frame_Base thisgate, bool reverse = false) : base ( gate, thisgate, reverse ) {}
-			protected override void OnTick ()
-			{
-				UltimaMoongate_Frame_Base nextGate = null;
-				
-				if (!Reverse)
-					nextGate = new UltimaMoongate_Black_Frame3 (Gate);
-				else
-					nextGate = new UltimaMoongate_Black_Frame1 (Gate, true);
-				
-				nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
-				ThisGate.Delete ();
-			}
-		}
-	}
-	public class UltimaMoongate_Black_Frame3 : UltimaMoongate_Frame_Base
-	{
-		[Constructable]
-		public UltimaMoongate_Black_Frame3 (UltimaMoongate_Base gate, bool reverse = false) : base (gate, reverse, 0x1FCF)
-		{
-			gate.currentGate = this;
-			GateTimer = new TransitionTimer (gate, this, reverse);
-			GateTimer.Start();
-		}
-		public UltimaMoongate_Black_Frame3 (Serial serial) : base (serial)	{}
-		public override void Serialize( GenericWriter writer )		{}
-		public override void Deserialize( GenericReader reader )	{}
-		
-		private class TransitionTimer : MoongateTransitionTimer
-		{
-			public TransitionTimer ( UltimaMoongate_Base gate, UltimaMoongate_Frame_Base thisgate, bool reverse = false) : base ( gate, thisgate, reverse ) {}
-			protected override void OnTick ()
-			{
-				UltimaMoongate_Frame_Base nextGate = null;
-				
-				if (!Reverse)
-					nextGate = new UltimaMoongate_Black_Frame4 (Gate);
-				else
-					nextGate = new UltimaMoongate_Black_Frame2 (Gate, true);
-				
-				nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
-				ThisGate.Delete ();
-			}
-		}
-	}
-	public class UltimaMoongate_Black_Frame4 : UltimaMoongate_Frame_Base
-	{
-		[Constructable]
-		public UltimaMoongate_Black_Frame4 (UltimaMoongate_Base gate, bool reverse = false) : base (gate, reverse, 0x1FD0)
-		{
-			gate.currentGate = this;
-			GateTimer = new TransitionTimer (gate, this, reverse);
-			GateTimer.Start();
-		}
-		public UltimaMoongate_Black_Frame4 (Serial serial) : base (serial)	{}
-		public override void Serialize( GenericWriter writer )		{}
-		public override void Deserialize( GenericReader reader )	{}
-		
-		private class TransitionTimer : MoongateTransitionTimer
-		{
-			public TransitionTimer ( UltimaMoongate_Base gate, UltimaMoongate_Frame_Base thisgate, bool reverse = false) : base ( gate, thisgate, reverse ) {}
-			protected override void OnTick ()
-			{
-				UltimaMoongate_Frame_Base nextGate = null;
-				
-				if (!Reverse)
-					nextGate = new UltimaMoongate_Black_Frame5 (Gate);
-				else
-					nextGate = new UltimaMoongate_Black_Frame3 (Gate, true);
-				
-				nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
-				ThisGate.Delete ();
-			}
-		}
-	}
-	public class UltimaMoongate_Black_Frame5 : UltimaMoongate_Frame_Base
-	{
-		[Constructable]
-		public UltimaMoongate_Black_Frame5 (UltimaMoongate_Base gate, bool reverse = false) : base (gate, reverse, 0x1FD1)
-		{
-			gate.currentGate = this;
-			GateTimer = new TransitionTimer (gate, this, reverse);
-			GateTimer.Start();
-		}
-		public UltimaMoongate_Black_Frame5 (Serial serial) : base (serial)	{}
-		public override void Serialize( GenericWriter writer )		{}
-		public override void Deserialize( GenericReader reader )	{}
-		
-		private class TransitionTimer : MoongateTransitionTimer
-		{
-			public TransitionTimer ( UltimaMoongate_Base gate, UltimaMoongate_Frame_Base thisgate, bool reverse = false) : base ( gate, thisgate, reverse ) {}
-			protected override void OnTick ()
-			{
-				UltimaMoongate_Frame_Base nextGate = null;
-				
-				if (!Reverse)
-					nextGate = new UltimaMoongate_Black_Frame6 (Gate);
-				else
-					nextGate = new UltimaMoongate_Black_Frame4 (Gate, true);
-				
-				nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
-				ThisGate.Delete ();
-			}
-		}
-	}
-	public class UltimaMoongate_Black_Frame6 : UltimaMoongate_Frame_Base
-	{
-		[Constructable]
-		public UltimaMoongate_Black_Frame6 (UltimaMoongate_Base gate, bool reverse = false) : base (gate, reverse, 0x1FD2)
-		{
-			gate.currentGate = this;
-			GateTimer = new TransitionTimer (gate, this, reverse);
-			GateTimer.Start();
-		}
-		public UltimaMoongate_Black_Frame6 (Serial serial) : base (serial)	{}
-		public override void Serialize( GenericWriter writer )		{}
-		public override void Deserialize( GenericReader reader )	{}
-		
-		private class TransitionTimer : MoongateTransitionTimer
-		{
-			public TransitionTimer ( UltimaMoongate_Base gate, UltimaMoongate_Frame_Base thisgate, bool reverse = false) : base ( gate, thisgate, reverse ) {}
-			protected override void OnTick ()
-			{
-				UltimaMoongate_Frame_Base nextGate = null;
-				
-				if (!Reverse)
-					nextGate = new UltimaMoongate_Black_Frame7 (Gate);
-				else
-					nextGate = new UltimaMoongate_Black_Frame5 (Gate, true);
-				
-				nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
-				ThisGate.Delete ();	
-			}
-		}
-	}
-	public class UltimaMoongate_Black_Frame7 : UltimaMoongate_Frame_Base
-	{
-		[Constructable]
-		public UltimaMoongate_Black_Frame7 (UltimaMoongate_Base gate, bool reverse = false) : base (gate, reverse, 0x1FD3)
-		{
-			gate.currentGate = this;
-			GateTimer = new TransitionTimer (gate, this, reverse);
-			GateTimer.Start();
-		}
-		public UltimaMoongate_Black_Frame7 (Serial serial) : base (serial)	{}
-		public override void Serialize( GenericWriter writer )		{}
-		public override void Deserialize( GenericReader reader )	{}
-		
-		private class TransitionTimer : MoongateTransitionTimer
-		{
-			public TransitionTimer ( UltimaMoongate_Base gate, UltimaMoongate_Frame_Base thisgate, bool reverse = false) : base ( gate, thisgate, reverse ) {}
-			protected override void OnTick ()
-			{
-				UltimaMoongate_Frame_Base nextGate = null;
-				
-				if (!Reverse)
-					nextGate = new UltimaMoongate_Black_Frame8 (Gate);
-				else
-					nextGate = new UltimaMoongate_Black_Frame6 (Gate, true);
-				
-				nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
-				ThisGate.Delete ();
-			}
-		}
-	}
-	public class UltimaMoongate_Black_Frame8 : UltimaMoongate_Frame_Base
-	{
-		[Constructable]
-		public UltimaMoongate_Black_Frame8 (UltimaMoongate_Base gate, bool reverse = false) : base (gate, reverse, 0x1FD4)
-		{
-			gate.currentGate = this;
-			gate.gateOpened = true;
-			if (gate.OpenTime > 0)
-			{
-				GateTimer = new TransitionTimer (gate, this, true, gate.OpenTime);
-				GateTimer.Start ();
-			}
-		}
-		
-		public UltimaMoongate_Black_Frame8 (Serial serial) : base (serial)	{}
-		public override void Serialize( GenericWriter writer )		{}
-		public override void Deserialize( GenericReader reader )	{}
-		
-		private class TransitionTimer : MoongateTransitionTimer
-		{
-			public TransitionTimer ( UltimaMoongate_Base gate, UltimaMoongate_Frame_Base thisgate, bool reverse = false, double opentime = 0.25)  : base ( gate, thisgate, reverse, opentime ) {}
-			protected override void OnTick ()
-			{
-				Gate.gateOpened = false;
-				UltimaMoongate_Frame_Base nextGate = new UltimaMoongate_Black_Frame7 (Gate, true);
-				nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
-				ThisGate.Delete ();
-			}
-		}
-	}
-#endregion
-
-#region SilverMoongateAnimation
-	public class UltimaMoongate_Silver : UltimaMoongate_Base
-	{
-		[Constructable]
-		public UltimaMoongate_Silver (Point3D target, Map map, double opentime, bool dispell = false, bool restrict = false, bool returngate = false) : base( target, map, opentime, dispell, restrict, returngate)
-		{
-			initGate ();
-		}
-		[Constructable]
-		public UltimaMoongate_Silver (double opentime) : base (opentime)
-		{
-			initGate ();
-		}
-		public UltimaMoongate_Silver( Serial serial ) : base( serial ) {}
-
-		public virtual void initGate ()
-		{
-			Name = "Manager for a Silver UltimaMoongate.";
-			gateTimer = new TransitionTimer (this);
-			gateTimer.Start();
-		}
-
-		public override void Serialize( GenericWriter writer ) { base.Serialize ( writer ); }
-		public override void Deserialize( GenericReader reader )
-		{
-			base.Deserialize ( reader );
-			
-			if (OpenTime > 0)
-				currentGate = new UltimaMoongate_Silver_Frame8 (this);
-			else
-				this.Delete ();
-		}
-
-		private class TransitionTimer : MoongateTransitionTimer
-		{
-			public TransitionTimer (UltimaMoongate_Base gate) : base ( gate ) {}
-			protected override void OnTick ()
-			{
-				if (Gate.ReturnGate)
-				{
-					UltimaMoongate_Base returnGate = new UltimaMoongate_Silver (Gate.GetWorldLocation(), Gate.Map, Gate.OpenTime, Gate.Dispellable, Gate.StockTravelRestrictions, false);
-					returnGate.MoveToWorld (Gate.Target, Gate.TargetMap);
-				}
-
-				UltimaMoongate_Frame_Base nextGate = new UltimaMoongate_Silver_Frame0 (Gate);
-				nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
-			}
-		}
-	}
-
-	public class UltimaMoongate_Silver_Frame0 : UltimaMoongate_Frame_Base
-	{
-		[Constructable]
-		public UltimaMoongate_Silver_Frame0 (UltimaMoongate_Base gate, bool reverse = false) : base (gate, reverse, 0x1FDF)
-		{
-			gate.currentGate = this;
-			GateTimer = new TransitionTimer (gate, this, reverse);
-			GateTimer.Start();
-		}
-		public UltimaMoongate_Silver_Frame0 (Serial serial) : base (serial) {}
-		public override void Serialize( GenericWriter writer )		{}
-		public override void Deserialize( GenericReader reader )	{}
-		
-		private class TransitionTimer : MoongateTransitionTimer
-		{
-			public TransitionTimer (UltimaMoongate_Base gate, UltimaMoongate_Frame_Base thisgate, bool reverse = false) : base ( gate, thisgate, reverse ) {}			
-			protected override void OnTick ()
-			{
-				UltimaMoongate_Frame_Base nextGate = null;
-				
-				if (!Reverse)
-				{
-					nextGate = new UltimaMoongate_Silver_Frame1 (Gate);
-					nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
-					ThisGate.Delete ();
-				}
-				else
-				{	
-					Gate.Delete ();
-					ThisGate.Delete ();
-				}
-			}
-		}
-	}
-	public class UltimaMoongate_Silver_Frame1 : UltimaMoongate_Frame_Base
-	{
-		[Constructable]
-		public UltimaMoongate_Silver_Frame1 (UltimaMoongate_Base gate, bool reverse = false) : base (gate, reverse, 0x1FE0)
-		{
-			gate.currentGate = this;
-			GateTimer = new TransitionTimer (gate, this, reverse);
-			GateTimer.Start();
-		}
-		public UltimaMoongate_Silver_Frame1 (Serial serial) : base (serial)  {}
-		public override void Serialize( GenericWriter writer )		{}
-		public override void Deserialize( GenericReader reader )	{}
-		
-		private class TransitionTimer : MoongateTransitionTimer
-		{
-			public TransitionTimer ( UltimaMoongate_Base gate, UltimaMoongate_Frame_Base thisgate, bool reverse = false) : base ( gate, thisgate, reverse ) {}
-			protected override void OnTick ()
-			{
-				UltimaMoongate_Frame_Base nextGate = null;
-				
-				if (!Reverse)
-					nextGate = new UltimaMoongate_Silver_Frame2 (Gate);
-				else
-					nextGate = new UltimaMoongate_Silver_Frame0 (Gate, true);
-				
-				nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
-				ThisGate.Delete ();
-			}
-		}
-	}
-	public class UltimaMoongate_Silver_Frame2 : UltimaMoongate_Frame_Base
-	{
-		[Constructable]
-		public UltimaMoongate_Silver_Frame2 (UltimaMoongate_Base gate, bool reverse = false) : base (gate, reverse, 0x1FE1)
-		{
-			gate.currentGate = this;
-			GateTimer = new TransitionTimer (gate, this, reverse);
-			GateTimer.Start();
-		}
-		public UltimaMoongate_Silver_Frame2 (Serial serial) : base (serial)  {}
-		public override void Serialize( GenericWriter writer )		{}
-		public override void Deserialize( GenericReader reader )	{}
-		
-		private class TransitionTimer : MoongateTransitionTimer
-		{
-			public TransitionTimer ( UltimaMoongate_Base gate, UltimaMoongate_Frame_Base thisgate, bool reverse = false) : base ( gate, thisgate, reverse ) {}
-			protected override void OnTick ()
-			{
-				UltimaMoongate_Frame_Base nextGate = null;
-				
-				if (!Reverse)
-					nextGate = new UltimaMoongate_Silver_Frame3 (Gate);
-				else
-					nextGate = new UltimaMoongate_Silver_Frame1 (Gate, true);
-				
-				nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
-				ThisGate.Delete ();
-			}
-		}
-	}
-	public class UltimaMoongate_Silver_Frame3 : UltimaMoongate_Frame_Base
-	{
-		[Constructable]
-		public UltimaMoongate_Silver_Frame3 (UltimaMoongate_Base gate, bool reverse = false) : base (gate, reverse, 0x1FE2)
-		{
-			gate.currentGate = this;
-			GateTimer = new TransitionTimer (gate, this, reverse);
-			GateTimer.Start();
-		}
-		public UltimaMoongate_Silver_Frame3 (Serial serial) : base (serial)  {}
-		public override void Serialize( GenericWriter writer )		{}
-		public override void Deserialize( GenericReader reader )	{}
-		
-		private class TransitionTimer : MoongateTransitionTimer
-		{
-			public TransitionTimer ( UltimaMoongate_Base gate, UltimaMoongate_Frame_Base thisgate, bool reverse = false) : base ( gate, thisgate, reverse ) {}
-			protected override void OnTick ()
-			{
-				UltimaMoongate_Frame_Base nextGate = null;
-				
-				if (!Reverse)
-					nextGate = new UltimaMoongate_Silver_Frame4 (Gate);
-				else
-					nextGate = new UltimaMoongate_Silver_Frame2 (Gate, true);
-				
-				nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
-				ThisGate.Delete ();
-			}
-		}
-	}
-	public class UltimaMoongate_Silver_Frame4 : UltimaMoongate_Frame_Base
-	{
-		[Constructable]
-		public UltimaMoongate_Silver_Frame4 (UltimaMoongate_Base gate, bool reverse = false) : base (gate, reverse, 0x1FE3)
-		{
-			gate.currentGate = this;
-			GateTimer = new TransitionTimer (gate, this, reverse);
-			GateTimer.Start();
-		}
-		public UltimaMoongate_Silver_Frame4 (Serial serial) : base (serial)  {}
-		public override void Serialize( GenericWriter writer )		{}
-		public override void Deserialize( GenericReader reader )	{}
-		
-		private class TransitionTimer : MoongateTransitionTimer
-		{
-			public TransitionTimer ( UltimaMoongate_Base gate, UltimaMoongate_Frame_Base thisgate, bool reverse = false) : base ( gate, thisgate, reverse ) {}
-			protected override void OnTick ()
-			{
-				UltimaMoongate_Frame_Base nextGate = null;
-				
-				if (!Reverse)
-					nextGate = new UltimaMoongate_Silver_Frame5 (Gate);
-				else
-					nextGate = new UltimaMoongate_Silver_Frame3 (Gate, true);
-				
-				nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
-				ThisGate.Delete ();
-			}
-		}
-	}
-	public class UltimaMoongate_Silver_Frame5 : UltimaMoongate_Frame_Base
-	{
-		[Constructable]
-		public UltimaMoongate_Silver_Frame5 (UltimaMoongate_Base gate, bool reverse = false) : base (gate, reverse, 0x1FE4)
-		{
-			gate.currentGate = this;
-			GateTimer = new TransitionTimer (gate, this, reverse);
-			GateTimer.Start();
-		}
-		public UltimaMoongate_Silver_Frame5 (Serial serial) : base (serial)  {}
-		public override void Serialize( GenericWriter writer )		{}
-		public override void Deserialize( GenericReader reader )	{}
-		
-		private class TransitionTimer : MoongateTransitionTimer
-		{
-			public TransitionTimer ( UltimaMoongate_Base gate, UltimaMoongate_Frame_Base thisgate, bool reverse = false) : base ( gate, thisgate, reverse ) {}
-			protected override void OnTick ()
-			{
-				UltimaMoongate_Frame_Base nextGate = null;
-				
-				if (!Reverse)
-					nextGate = new UltimaMoongate_Silver_Frame6 (Gate);
-				else
-					nextGate = new UltimaMoongate_Silver_Frame4 (Gate, true);
-				
-				nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
-				ThisGate.Delete ();
-			}
-		}
-	}
-	public class UltimaMoongate_Silver_Frame6 : UltimaMoongate_Frame_Base
-	{
-		[Constructable]
-		public UltimaMoongate_Silver_Frame6 (UltimaMoongate_Base gate, bool reverse = false) : base (gate, reverse, 0x1FE5)
-		{
-			gate.currentGate = this;
-			GateTimer = new TransitionTimer (gate, this, reverse);
-			GateTimer.Start();
-		}
-		public UltimaMoongate_Silver_Frame6 (Serial serial) : base (serial)  {}
-		public override void Serialize( GenericWriter writer )		{}
-		public override void Deserialize( GenericReader reader )	{}
-		
-		private class TransitionTimer : MoongateTransitionTimer
-		{
-			public TransitionTimer ( UltimaMoongate_Base gate, UltimaMoongate_Frame_Base thisgate, bool reverse = false) : base ( gate, thisgate, reverse ) {}
-			protected override void OnTick ()
-			{
-				UltimaMoongate_Frame_Base nextGate = null;
-				
-				if (!Reverse)
-					nextGate = new UltimaMoongate_Silver_Frame7 (Gate);
-				else
-					nextGate = new UltimaMoongate_Silver_Frame5 (Gate, true);
-				
-				nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
-				ThisGate.Delete ();	
-			}
-		}
-	}
-	public class UltimaMoongate_Silver_Frame7 : UltimaMoongate_Frame_Base
-	{
-		[Constructable]
-		public UltimaMoongate_Silver_Frame7 (UltimaMoongate_Base gate, bool reverse = false) : base (gate, reverse, 0x1FE6)
-		{
-			gate.currentGate = this;
-			GateTimer = new TransitionTimer (gate, this, reverse);
-			GateTimer.Start();
-		}
-		public UltimaMoongate_Silver_Frame7 (Serial serial) : base (serial)  {}
-		public override void Serialize( GenericWriter writer )		{}
-		public override void Deserialize( GenericReader reader )	{}
-		
-		private class TransitionTimer : MoongateTransitionTimer
-		{
-			public TransitionTimer ( UltimaMoongate_Base gate, UltimaMoongate_Frame_Base thisgate, bool reverse = false) : base ( gate, thisgate, reverse ) {}
-			protected override void OnTick ()
-			{
-				UltimaMoongate_Frame_Base nextGate = null;
-				
-				if (!Reverse)
-					nextGate = new UltimaMoongate_Silver_Frame8 (Gate);
-				else
-					nextGate = new UltimaMoongate_Silver_Frame6 (Gate, true);
-				
-				nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
-				ThisGate.Delete ();
-			}
-		}
-	}
-	public class UltimaMoongate_Silver_Frame8 : UltimaMoongate_Frame_Base
-	{
-		[Constructable]
-		public UltimaMoongate_Silver_Frame8 (UltimaMoongate_Base gate, bool reverse = false) : base (gate, reverse, 0x1FE7)
-		{
-			gate.currentGate = this;
-			gate.gateOpened = true;
-			if (gate.OpenTime > 0)
-			{
-				GateTimer = new TransitionTimer (gate, this, true, gate.OpenTime);
-				GateTimer.Start ();
-			}
-		}
-		
-		public UltimaMoongate_Silver_Frame8 (Serial serial) : base (serial)  {}
-		public override void Serialize( GenericWriter writer )		{}
-		public override void Deserialize( GenericReader reader )	{}
-		
-		private class TransitionTimer : MoongateTransitionTimer
-		{
-			public TransitionTimer ( UltimaMoongate_Base gate, UltimaMoongate_Frame_Base thisgate, bool reverse = false, double opentime = 0.25)  : base ( gate, thisgate, reverse, opentime ) {}
-			protected override void OnTick ()
-			{
-				Gate.gateOpened = false;
-				UltimaMoongate_Frame_Base nextGate = new UltimaMoongate_Silver_Frame7 (Gate, true);
-				nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
-				ThisGate.Delete ();
-			}
-		}
-	}
-#endregion
 }

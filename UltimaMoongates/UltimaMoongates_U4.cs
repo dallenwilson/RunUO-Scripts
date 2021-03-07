@@ -40,7 +40,10 @@ using Warped.Items;
 namespace Warped.Items
 {
  #region UltimaIVMoongates
-	public class UltimaMoongate : Item
+
+ 	// The UltimaMoongate_U4 opens and closes the gate according to the moon phases.
+	// It is represented by a worldgem bit and is invisible to players in-game.
+	public class UltimaMoongate_U4 : Item
 	{
 		/*
 		 * Trammel - Determines which moongate is open. Changes every 30 in-game minutes / 150 real-seconds
@@ -60,12 +63,12 @@ namespace Warped.Items
 		//	Default to Britain.
 		public MoonPhase ThisGateIs = MoonPhase.WaxingCrescentMoon;
 		
-		public UltimaMoongate_Base Gate = null;
+		public UltimaMoongate_U4_Gate Gate = null;
 
 		private Timer m_Timer = null;
 
 		[Constructable]
-		public UltimaMoongate ( MoonPhase phase ) : base( 0x1F13 )
+		public UltimaMoongate_U4 ( MoonPhase phase ) : base( 0x1F13 )
 		{
 			ThisGateIs = phase;
 			Movable = false;
@@ -75,7 +78,7 @@ namespace Warped.Items
 			initTimer ();
 		}
 
-		public UltimaMoongate( Serial serial ) : base( serial ) {}
+		public UltimaMoongate_U4 ( Serial serial ) : base( serial ) {}
 
 		public override void Serialize( GenericWriter writer )
 		{
@@ -145,9 +148,9 @@ namespace Warped.Items
 		
 		private class UltimaMoongateTimer : Timer
 		{
-			private UltimaMoongate m_Gate;
+			private UltimaMoongate_U4 m_Gate;
 
-			public UltimaMoongateTimer ( UltimaMoongate gate, double timerDuration = 20 ) : base ( TimeSpan.FromSeconds (timerDuration) )
+			public UltimaMoongateTimer ( UltimaMoongate_U4 gate, double timerDuration = 20 ) : base ( TimeSpan.FromSeconds (timerDuration) )
 			{
 				m_Gate = gate;
 				Priority = TimerPriority.TwentyFiveMS;
@@ -164,7 +167,7 @@ namespace Warped.Items
 					{
 						if (m_Gate.Gate == null)
 						{
-							m_Gate.Gate = new UltimaMoongate_U4 ( (timeToNextPhase - 2) );
+							m_Gate.Gate = new UltimaMoongate_U4_Gate ( (timeToNextPhase - 2) );
 							m_Gate.Gate.MoveToWorld (m_Gate.GetWorldLocation(), m_Gate.Map );
 						}
 					}
@@ -191,10 +194,10 @@ namespace Warped.Items
 
 			for (int x = 0; x < 8; x++)
 			{
-				Item felGate = new UltimaMoongate ((MoonPhase)x);
-				felGate.MoveToWorld (UltimaMoongate_U4.MoonPhase2Destination ((MoonPhase)x), Map.Felucca);
-				Item tramGate = new UltimaMoongate ((MoonPhase)x);
-				tramGate.MoveToWorld (UltimaMoongate_U4.MoonPhase2Destination ((MoonPhase)x), Map.Trammel);
+				Item felGate = new UltimaMoongate_U4 ((MoonPhase)x);
+				felGate.MoveToWorld (UltimaMoongate_U4_Gate.MoonPhase2Destination ((MoonPhase)x), Map.Felucca);
+				Item tramGate = new UltimaMoongate_U4 ((MoonPhase)x);
+				tramGate.MoveToWorld (UltimaMoongate_U4_Gate.MoonPhase2Destination ((MoonPhase)x), Map.Trammel);
 			}
 		}
 		private static void U4MoonGen_DeleteOld ()
@@ -207,7 +210,7 @@ namespace Warped.Items
 
 			foreach (Item item in World.Items.Values)
 			{
-				if (item is UltimaMoongate)
+				if (item is UltimaMoongate_U4)
 					U4_list.Add (item);
 				else if (item is PublicMoongate)
 					Public_list.Add (item);
@@ -218,7 +221,7 @@ namespace Warped.Items
 			{
 				for (int x = 0; x < 8; x++)
 				{
-					if (item.GetWorldLocation() == UltimaMoongate_U4.MoonPhase2Destination ((MoonPhase)x))
+					if (item.GetWorldLocation() == UltimaMoongate_U4_Gate.MoonPhase2Destination ((MoonPhase)x))
 					{
 						item.Delete();
 						u4count++;
@@ -234,7 +237,7 @@ namespace Warped.Items
 				{
 					for (int x = 0; x < 8; x++)
 					{
-						if (item.GetWorldLocation() == UltimaMoongate_U4.MoonPhase2Destination ((MoonPhase)x))
+						if (item.GetWorldLocation() == UltimaMoongate_U4_Gate.MoonPhase2Destination ((MoonPhase)x))
 						{
 							item.Delete();
 							publiccount++;
@@ -251,19 +254,21 @@ namespace Warped.Items
 		}
 	}
 	
-	public class UltimaMoongate_U4 : UltimaMoongate_Blue
+	// The UltimaMoongate_U4_Gate handles the gate opening/closing animations and the teleportation.
+	// It is represented by a worldgem bit and is invisible to players in-game.
+	public class UltimaMoongate_U4_Gate : UltimaMoongate
 	{
 		private MoonPhase m_targetPhase = MoonPhase.WaxingCrescentMoon;
 		private bool m_usePhase = false;
 
 		[Constructable]
-		public UltimaMoongate_U4 (double opentime) : base (opentime) {}
-		public UltimaMoongate_U4 (double opentime, MoonPhase targetPhase) : base (opentime)
+		public UltimaMoongate_U4_Gate (double opentime) : base (opentime) {}
+		public UltimaMoongate_U4_Gate (double opentime, MoonPhase targetPhase) : base (opentime)
 		{
 			m_targetPhase = targetPhase;
 			m_usePhase = true;
 		}
-		public UltimaMoongate_U4 ( Serial serial ) : base( serial ) {}
+		public UltimaMoongate_U4_Gate ( Serial serial ) : base( serial ) {}
 		
 		public override void initGate ()
 		{
@@ -280,7 +285,7 @@ namespace Warped.Items
 		public override void Deserialize( GenericReader reader )
 		{
 			base.Deserialize ( reader );
-			currentGate = (UltimaMoongate_Frame_Base)reader.ReadItem();
+			currentGate = (UltimaMoongate_Frame)reader.ReadItem();
 
 			// If opentime is non-zero, assume this was a summoned gate and delete it.
 			// If summoned by an UltimaMoongate by the moon phase, it'll re-create it when it loads.
@@ -322,18 +327,18 @@ namespace Warped.Items
 			
 			return false;
 		}
-
+		
 		// Starts the moongate animation sequence
 		private class TransitionTimer : MoongateTransitionTimer
 		{
-			public TransitionTimer (UltimaMoongate_Base gate) : base ( gate ) {}
+			public TransitionTimer (UltimaMoongate gate) : base ( gate ) {}
 			protected override void OnTick ()
 			{
-				UltimaMoongate_Frame_Base nextGate = new UltimaMoongate_Blue_Frame0 (Gate);
+				UltimaMoongate_Frame nextGate = new UltimaMoongate_Frame (Gate, MoongateFrame.Frame0, false, UltimaMoongate.GetMoongateFrameID (Gate.Colour, MoongateFrame.Frame0));
 				nextGate.MoveToWorld (Gate.GetWorldLocation (), Gate.Map);
 			}
 		}
-		
+
 		//	Converts MoonPhase to Point3D destination. Coords lifted from Items/Misc/PublicMoongate.cs
 		public static Point3D MoonPhase2Destination (MoonPhase phase)
 		{
